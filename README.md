@@ -1,1 +1,1 @@
-# smart documentation chatbot
+# Smart Documentation Chatbot
