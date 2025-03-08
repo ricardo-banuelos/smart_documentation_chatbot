@@ -4,9 +4,12 @@ from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
+from dotenv import load_dotenv
+
 import os
 import uuid
 
+load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)
@@ -47,13 +50,17 @@ async def root():
     }
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     file_extension = get_file_extension(file.filename)
     unique_file_name = f'{uuid.uuid4()}{file_extension}'
 
     file_path = os.path.join(UPLOAD_DIR, unique_file_name)
     with open(file_path, 'wb') as buffer:
         buffer.write(await file.read())
+
+    doc = Document(filename=file.filename, content="File content placeholder")
+    db.add(doc)
+    db.commit()
 
     return {
         "file_name": unique_file_name,
