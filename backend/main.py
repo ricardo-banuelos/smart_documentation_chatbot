@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Depends
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 import os
 import uuid
+import pdfplumber
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -43,6 +44,13 @@ def get_file_extension(filename: str):
         return parts[1]
     return ""
 
+def extract_text_from_pdf(file_path: str):
+    with pdfplumber.open(file_path) as pdf:
+        text = ""
+        for page in pdf.pages:
+            text += page.extract_text()
+        return text
+
 @app.get("/")
 async def root():
     return {
@@ -52,6 +60,10 @@ async def root():
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     file_extension = get_file_extension(file.filename)
+
+    if file_extension != '.pdf':
+        raise HTTPException(400, 'Invalid file extension!!!')
+
     unique_file_name = f'{uuid.uuid4()}{file_extension}'
 
     file_path = os.path.join(UPLOAD_DIR, unique_file_name)
