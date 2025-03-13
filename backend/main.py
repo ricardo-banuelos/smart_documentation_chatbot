@@ -59,18 +59,23 @@ async def root():
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    file_extension = get_file_extension(file.filename)
 
+    # Get and validate file extension
+    file_extension = get_file_extension(file.filename)
     if file_extension != '.pdf':
         raise HTTPException(400, 'File extension must be .pdf')
 
+    # Save file with unique name to avoid duplicates
     unique_file_name = f'{uuid.uuid4()}{file_extension}'
-
     file_path = os.path.join(UPLOAD_DIR, unique_file_name)
     with open(file_path, 'wb') as buffer:
         buffer.write(await file.read())
 
-    doc = Document(filename=file.filename, content="File content placeholder")
+    # Extract text from PDF
+    text_content = extract_text_from_pdf(file_path)
+
+    # Store content in db
+    doc = Document(filename=unique_file_name, content=text_content)
     db.add(doc)
     db.commit()
 
