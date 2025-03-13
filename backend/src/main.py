@@ -3,19 +3,30 @@ from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from sqlalchemy import create_engine, Column, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from sentence_transformers import SentenceTransformer
 
 from dotenv import load_dotenv
 
 import os
 import uuid
+import faiss
 import pdfplumber
+import numpy as np
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# Database setup
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# Load the sentence transformer model
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# FAISS index
+embedding_dimension = 384  # Dimension of MiniLM embeddings
+faiss_index = faiss.IndexFlatL2(embedding_dimension)  # L2 distance for vector search
 
 # Document Model
 class Document(Base):
@@ -73,6 +84,12 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 
     # Extract text from PDF
     text_content = extract_text_from_pdf(file_path)
+
+    # Generate embedding for the document
+    embedding = model.encode([text_content])[0]
+
+    # Add the embedding to FAISS index
+    faiss_index.add(np.array([embedding], dtype=np.float32))
 
     # Store content in db
     doc = Document(filename=unique_file_name, content=text_content)
