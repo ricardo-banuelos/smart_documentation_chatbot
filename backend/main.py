@@ -62,7 +62,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     file_extension = get_file_extension(file.filename)
 
     if file_extension != '.pdf':
-        raise HTTPException(400, 'Invalid file extension!!!')
+        raise HTTPException(400, 'File extension must be .pdf')
 
     unique_file_name = f'{uuid.uuid4()}{file_extension}'
 
