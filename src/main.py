@@ -93,7 +93,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         
         # Initialize the query engine
         try:
-            engine = PDFQueryEngine()
+            engine = PDFQueryEngine(OPEN_AI_API_KEY)
             engine.load_pdf(file_path)
             
             # Store in memory

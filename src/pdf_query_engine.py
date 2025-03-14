@@ -47,6 +47,9 @@ class PDFQueryEngine:
             return_messages=True,
             output_key="answer"
         )
+
+        # Initialize memory storage for different sessions
+        self.memories = {}
         
     def load_pdf(self, pdf_path, chunk_size=1000, chunk_overlap=100):
         """
