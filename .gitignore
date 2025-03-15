@@ -79,3 +79,6 @@ docker-compose.override.yml
 
 # Upload directory
 /uploads
+
+# Database directory
+/database
