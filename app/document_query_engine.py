@@ -1,5 +1,4 @@
 import os
-from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -8,13 +7,17 @@ from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
+from .document_loaders import DocumentLoaderFactory
+
 # Load environment variables from .env file
 load_dotenv()
 
-class PDFQueryEngine:
+class DocumentQueryEngine:
+    """Base query engine for all document types"""
+    
     def __init__(self, openai_api_key=None, model_name="gpt-3.5-turbo"):
         """
-        Initialize the PDF query engine with conversational memory.
+        Initialize the document query engine with conversational memory.
         
         Args:
             openai_api_key: Your OpenAI API key. If None, will look for OPENAI_API_KEY in environment variables.
@@ -41,22 +44,19 @@ class PDFQueryEngine:
         # Vector store
         self.vector_store = None
         
-        # Initialize conversation memory
-        self.memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer"
-        )
-
         # Initialize memory storage for different sessions
         self.memories = {}
         
-    def load_pdf(self, pdf_path, chunk_size=1000, chunk_overlap=100):
+        # Document metadata
+        self.document_type = None
+        self.document_path = None
+    
+    def load_document(self, file_path, chunk_size=1000, chunk_overlap=100):
         """
-        Load and process a PDF file.
+        Load and process a document file.
         
         Args:
-            pdf_path: Path to the PDF file.
+            file_path: Path to the document file.
             chunk_size: Size of text chunks to split the document into.
             chunk_overlap: Amount of overlap between chunks.
         
@@ -64,12 +64,19 @@ class PDFQueryEngine:
             self: For method chaining.
         """
         # Check if file exists
-        if not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Document file not found: {file_path}")
         
-        # Load PDF
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
+        # Get the document loader based on file extension
+        loader = DocumentLoaderFactory.get_loader(file_path)
+        
+        # Load document
+        documents = loader.load(file_path)
+        
+        # Store document metadata
+        self.document_path = file_path
+        _, ext = os.path.splitext(file_path.lower())
+        self.document_type = ext
         
         # Split text into chunks
         text_splitter = RecursiveCharacterTextSplitter(
@@ -80,13 +87,6 @@ class PDFQueryEngine:
         
         # Create vector store
         self.vector_store = FAISS.from_documents(chunks, self.embeddings)
-        
-        # Reset memory when loading a new PDF
-        self.memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer"
-        )
         
         return self
     
@@ -111,7 +111,7 @@ class PDFQueryEngine:
             ConversationalRetrievalChain: The question-answering chain.
         """
         if not self.vector_store:
-            raise ValueError("No PDF has been loaded. Call load_pdf() first.")
+            raise ValueError("No document has been loaded. Call load_document() first.")
         
         # Get or create memory for this session
         session_id = session_id or "default"
@@ -151,7 +151,7 @@ class PDFQueryEngine:
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=retriever,
-            memory=self.memory,
+            memory=memory,
             combine_docs_chain_kwargs={"prompt": qa_prompt},
             condense_question_prompt=condense_prompt,
             return_source_documents=True
@@ -161,10 +161,10 @@ class PDFQueryEngine:
     
     def query(self, question, session_id=None):
         """
-        Query the PDF with a question, maintaining conversation history.
+        Query the document with a question, maintaining conversation history.
         
         Args:
-            question: The question to ask about the PDF.
+            question: The question to ask about the document.
             session_id: Optional identifier for the conversation session.
         
         Returns:
@@ -203,3 +203,15 @@ class PDFQueryEngine:
         else:
             self.memories = {}
             return {"status": "success", "message": "All conversation histories cleared"}
+
+# Factory to create different engines based on document type
+class QueryEngineFactory:
+    """Factory for creating query engines"""
+    
+    @staticmethod
+    def create_engine(file_path, openai_api_key=None, model_name="gpt-3.5-turbo"):
+        """Create appropriate query engine for the document type"""
+        # For now, we're using the same engine for all document types
+        # This can be expanded to create specialized engines if needed
+        engine = DocumentQueryEngine(openai_api_key, model_name)
+        return engine
