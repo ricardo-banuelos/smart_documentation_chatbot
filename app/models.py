@@ -8,7 +8,7 @@ import os
 os.makedirs("database", exist_ok=True)
 
 # Create SQLite engine
-DATABASE_URL = "sqlite:///database/pdf_query.db"
+DATABASE_URL = "sqlite:///database/document_query.db"
 engine = create_engine(DATABASE_URL)
 
 # Create session factory
@@ -18,12 +18,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class Document(Base):
-    """Model for uploaded PDF documents"""
+    """Model for uploaded documents"""
     __tablename__ = "documents"
     
     id = Column(String, primary_key=True)
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
+    file_type = Column(String, nullable=True)  # 'pdf', 'txt', 'docx', etc.
     upload_date = Column(DateTime, default=datetime.utcnow)
     
     # Relationships

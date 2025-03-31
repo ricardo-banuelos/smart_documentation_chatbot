@@ -7,13 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from .pdf_query_engine import PDFQueryEngine
+from .document_query_engine import QueryEngineFactory
+from .document_loaders import DocumentLoaderFactory
 from .models import get_db, Document, Session as DBSession, Message
 
 from dotenv import load_dotenv
 
 # Initialize FastAPI app
-app = FastAPI(title="PDF Query API", description="API for querying PDF documents using LLMs")
+app = FastAPI(title="Document Query API", description="API for querying documents using LLMs")
 
 # Add CORS middleware
 app.add_middleware(
@@ -32,7 +33,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # In-memory storage for query engines
-engines = {}  # document_id -> PDFQueryEngine instance
+engines = {}  # document_id -> DocumentQueryEngine instance
 
 
 class QueryRequest(BaseModel):
@@ -49,6 +50,7 @@ class QueryResponse(BaseModel):
 class DocumentInfo(BaseModel):
     id: str
     filename: str
+    file_type: str
     upload_date: str
 
 
@@ -71,19 +73,27 @@ class ChatHistoryResponse(BaseModel):
 
 
 @app.post("/upload/", response_model=DocumentInfo)
-async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
-    Upload a PDF document and prepare it for querying.
+    Upload a document (PDF, TXT, DOCX) and prepare it for querying.
     """
     try:
-        if not file.filename.endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+        # Get the file extension and check if it's supported
+        filename = file.filename
+        _, file_ext = os.path.splitext(filename.lower())
+        
+        supported_extensions = DocumentLoaderFactory.get_supported_extensions()
+        
+        if file_ext not in supported_extensions:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type: {file_ext}. Supported types: {', '.join(supported_extensions)}"
+            )
         
         # Generate unique ID for this document
         document_id = str(uuid.uuid4())
         
         # Create file path
-        filename = file.filename
         file_path = os.path.join(UPLOAD_DIR, f"{document_id}_{filename}")
         
         # Save uploaded file
@@ -98,8 +108,8 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
         
         # Initialize the query engine
         try:
-            engine = PDFQueryEngine(OPEN_AI_API_KEY)
-            engine.load_pdf(file_path)
+            engine = QueryEngineFactory.create_engine(file_path, OPEN_AI_API_KEY)
+            engine.load_document(file_path)
             
             # Store engine in memory
             engines[document_id] = engine
@@ -108,7 +118,8 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             db_document = Document(
                 id=document_id,
                 filename=filename,
-                file_path=file_path
+                file_path=file_path,
+                file_type=file_ext[1:]  # Store without the leading dot
             )
             db.add(db_document)
             db.commit()
@@ -116,6 +127,7 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             return {
                 "id": document_id, 
                 "filename": filename,
+                "file_type": file_ext[1:],
                 "upload_date": db_document.upload_date.isoformat()
             }
         
@@ -123,7 +135,7 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             # Clean up the file if engine initialization fails
             if os.path.exists(file_path):
                 os.remove(file_path)
-            raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
         
     except HTTPException:
         raise
@@ -135,7 +147,7 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
 @app.post("/query/{document_id}", response_model=QueryResponse)
 async def query_document(document_id: str, query_request: QueryRequest, db: Session = Depends(get_db)):
     """
-    Query a previously uploaded PDF document with conversation memory.
+    Query a previously uploaded document with conversation memory.
     """
     # Check if document exists in database
     db_document = db.query(Document).filter(Document.id == document_id).first()
@@ -145,8 +157,8 @@ async def query_document(document_id: str, query_request: QueryRequest, db: Sess
     # Get or initialize engine
     if document_id not in engines:
         try:
-            engine = PDFQueryEngine(OPEN_AI_API_KEY)
-            engine.load_pdf(db_document.file_path)
+            engine = QueryEngineFactory.create_engine(db_document.file_path, OPEN_AI_API_KEY)
+            engine.load_document(db_document.file_path)
             engines[document_id] = engine
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to initialize query engine: {str(e)}")
@@ -229,6 +241,7 @@ async def list_documents(db: Session = Depends(get_db)):
         {
             "id": doc.id, 
             "filename": doc.filename,
+            "file_type": doc.file_type or "pdf",  # Default to pdf for backward compatibility
             "upload_date": doc.upload_date.isoformat()
         } 
         for doc in documents
